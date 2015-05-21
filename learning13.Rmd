@@ -1,0 +1,139 @@
+---
+title: "Qualification of gym exercises using ML "
+output: html_document
+---
+### Introduction
+
+The data used here for a machine learning (ML) assignment, were collected from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in the gym. They each performed barbell lifts correctly and incorrectly in 5 different ways (data published by Velloso et al., 2013). The objective here is to classify these different ways using machine learning.
+
+### exploratory analysis and feature selection
+
+Loading the files from directory,
+
+```{r}
+setwd("C:/Users/Arthur/Desktop/CourseraR/machine learning")
+## read in files
+testing <- read.csv ("pml-testing.csv", header = TRUE, sep = ",")
+training <- read.csv ("pml-training.csv", header = TRUE, sep = ",")
+
+```
+
+Loading required packages caret for machine learning, and ggplot2 for plotting. Partitioning training set into new training and testing subsets,
+
+```{r, message=FALSE}
+library (caret); library (ggplot2)
+set.seed(54321)
+inTrain = createDataPartition(training$classe, p = 0.75)[[1]]
+trainingpart <- training [inTrain,]
+testingpart <- training [-inTrain, ]
+
+```
+
+Plotting relations of 4 selected variables,
+
+```{r}
+
+featurePlot (x = trainingpart [, c ("user_name", "classe", "roll_belt")], y = trainingpart$X, plot = "pairs" ) 
+
+```
+
+The featureplot shows:
+
+- Index variable  "X" which is identical to rownumbers,correlates nicely with classe. This is due to the way the observations are ordered by user and classe and it would be trivial to use this variable.
+
+- Users are easily differentiated in 2 groups by just the roll belt variable. However this variable also shows some difference between classes and should be kept for classe prediction. 
+
+- User / classe table is complete.
+
+
+Removing variables (such as row index "X" and statistical summaries with many NAs).
+
+```{r}
+trainingpart1 <- trainingpart [, - c(27:36, 50:59, 103:112, 141:150)]
+trainingpart2 <- trainingpart1 [, - c (3:7,14,17,18,19,21,22,24,25,26)]
+trainingpart3 <- trainingpart2 [, - c (41:49, 55, 58:60, 62,63, 64:66)]
+trainingpart4 <- trainingpart3 [, -c (49,65, 68:70, 72,73,75:77)]
+trainingpart5 <- trainingpart4 [, -c (1,7,8,9,10,35:40, 44,46,62:67) ]
+
+```
+Looking at the correlation of instrument readings and the calculated feature variables (total acceleration, yaw, pitch, and roll).
+
+```{r, fig.width=9,fig.height=9}
+trainingpart6 <- trainingpart5 [, -c (1,6,7,33:35, 59)]
+matrix1 <- apply (trainingpart6, 2, as.numeric)
+cormatrix <- abs ( cor (matrix1))
+heatmap (cormatrix,   cexRow = 0.6 , cexCol = 0.6)
+```
+
+Heatmap image shows clustering of variables sometimes according to detector type, x/y/z axis, and body/dumbbell location of detection instruments. No obvious need to remove redundant variables. 
+
+### choosing model and training
+
+The problem becomes a multiclass prediction with mostly numeric or integer predictor variables. A general linear model allowing multiclass predictions (glmnet) was not tried. Instead tree decision models were used.
+
+First, using rpart to build a model to predict the classe variable for any observations, while using all remaining variables, and using cross validation on the training set.
+
+```{r, message=FALSE}
+trainingpart7 <- trainingpart5 [,-c (6,7,33:35)]
+cvCtrl <- trainControl (method = "cv")
+nieuwmodel <- train (classe~., data = trainingpart7, method = "rpart", trControl = cvCtrl)
+```
+
+Plotting the decision tree for the classe variable,
+
+```{r, fig.width=9, message=FALSE}
+library (partykit)
+dinges <- nieuwmodel$finalModel
+dinges <- as.party (dinges)
+plot(dinges)
+
+```
+
+The rpart decision tree separates some classes (A and E) well, but does not go beyond this partial classification. Note that the variables best used for splitting are mainly calculated features ("covariates"). 
+
+Next step is training a random forest model with cross validation. Random forest (rf method in caret) chooses random subsets of variables each time (number = mtry) to evaluate for splitting at nodes, and builds 500 trees in default. This took appr. 70 minutes on my laptop, so loading precalculated model from directory.
+
+```{r}
+if (file.exists ("newmodelE.rds" )) 
+{newmodelE <- readRDS ("newmodelE.rds")
+ 
+ } else 
+ 
+ {cvCtrl <- trainControl (method = "cv")
+  newmodelE <- train (classe~., data = trainingpart7, method = "rf", trControl = cvCtrl)
+ }
+```
+
+### resulting rf model with in and out of sample errors
+
+Looking at the model,
+
+```{r}
+newmodelE
+```
+
+The prediction accuracy is 99.3% , so in sample error is around 0.7%. With cross validation used, this would be an estimate of out of sample error. Note that mtry = 2 performs well already.
+```{r}
+confusionMatrix (newmodelE)
+```
+
+Showing a table of classe predictions and actual classes (as percentages of observations). All classes are separated appr. equally well.
+
+The next step is to determine the prediction accuracy on the testing set,
+
+```{r, message=FALSE}
+
+predictionsA <- predict (newmodelE, testingpart) 
+confusionMatrix (predictionsA, testingpart$classe)
+
+```
+
+The confusion matrix indicates 99,4% out of sample accuracy, with a full summary included.
+
+### conclusion
+
+The random forest method for training a model works very well on this dataset, predicting qualitative classes for barbbell lifts with more than 99% accuracy. It might be possible to further simplify the model using fewer variables while maintaining good accuracy. With fewer predictors, the model might become more interpretable.
+
+### reference
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. http://groupware.les.inf.puc-rio.br/har
